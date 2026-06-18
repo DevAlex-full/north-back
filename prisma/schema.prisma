@@ -1,0 +1,340 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  notificationSettings NotificationSetting?
+  financialCategories  FinancialCategory[]
+  financialTransactions FinancialTransaction[]
+  dailyGoals           DailyGoal[]
+  scheduleBlocks       ScheduleBlock[]
+  routines             Routine[]
+  tasks                Task[]
+  leads                Lead[]
+  workanaProposals     WorkanaProposal[]
+  jobApplications      JobApplication[]
+  contentPlans         ContentPlan[]
+  projects             Project[]
+  goals                Goal[]
+  settings             UserSettings?
+
+  @@map("users")
+}
+
+model UserSettings {
+  id              String  @id @default(cuid())
+  userId          String  @unique
+  dailyGoalAmount Float   @default(150)
+  weeklyGoal      Float   @default(900)
+  monthlyGoal     Float   @default(3600)
+  theme           String  @default("dark")
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+model NotificationSetting {
+  id               String  @id @default(cuid())
+  userId           String  @unique
+  enabled          Boolean @default(true)
+  morningEnabled   Boolean @default(true)
+  morningTime      String  @default("09:00")
+  prospectEnabled  Boolean @default(true)
+  prospectTime     String  @default("13:00")
+  indriveEnabled   Boolean @default(true)
+  indriveTime      String  @default("15:00")
+  closingEnabled   Boolean @default(true)
+  closingTime      String  @default("21:00")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_settings")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model FinancialCategory {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  type      String   // INCOME | EXPENSE
+  color     String?
+  icon      String?
+  createdAt DateTime @default(now())
+
+  user         User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions FinancialTransaction[]
+
+  @@index([userId])
+  @@map("financial_categories")
+}
+
+model FinancialTransaction {
+  id          String   @id @default(cuid())
+  userId      String
+  categoryId  String
+  type        String   // INCOME | EXPENSE
+  amount      Float
+  description String?
+  date        DateTime @default(now())
+  paymentMethod String?
+  source      String?  // indrive | freelance | outros
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category FinancialCategory @relation(fields: [categoryId], references: [id])
+
+  @@index([userId])
+  @@index([date])
+  @@index([type])
+  @@map("financial_transactions")
+}
+
+model DailyGoal {
+  id          String   @id @default(cuid())
+  userId      String
+  date        DateTime
+  targetAmount Float
+  earnedAmount Float   @default(0)
+  gasAmount    Float   @default(0)
+  status      String   @default("BELOW") // BELOW | ALMOST | REACHED
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@index([userId])
+  @@index([date])
+  @@map("daily_goals")
+}
+
+model Routine {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  dayOfWeek   Int[]    // 0=Sun, 1=Mon, ..., 6=Sat
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scheduleBlocks ScheduleBlock[]
+
+  @@index([userId])
+  @@map("routines")
+}
+
+model ScheduleBlock {
+  id          String   @id @default(cuid())
+  userId      String
+  routineId   String?
+  title       String
+  description String?
+  startTime   String   // "HH:MM"
+  endTime     String   // "HH:MM"
+  dayOfWeek   Int[]    // 0=Sun, 1=Mon, ..., 6=Sat
+  category    String?  // programacao | prospeccao | indrive | pessoal
+  isRecurring Boolean  @default(true)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  routine Routine? @relation(fields: [routineId], references: [id])
+  tasks   Task[]
+
+  @@index([userId])
+  @@map("schedule_blocks")
+}
+
+model Task {
+  id              String   @id @default(cuid())
+  userId          String
+  scheduleBlockId String?
+  title           String
+  description     String?
+  date            DateTime
+  status          String   @default("PENDING") // PENDING | IN_PROGRESS | DONE | SKIPPED
+  priority        Int      @default(2) // 1=high, 2=medium, 3=low
+  isRecurring     Boolean  @default(false)
+  completedAt     DateTime?
+  observation     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scheduleBlock ScheduleBlock? @relation(fields: [scheduleBlockId], references: [id])
+
+  @@index([userId])
+  @@index([date])
+  @@index([status])
+  @@map("tasks")
+}
+
+model Lead {
+  id              String   @id @default(cuid())
+  userId          String
+  name            String
+  company         String?
+  niche           String?
+  phone           String?
+  instagram       String?
+  origin          String?  // workana | linkedin | facebook | whatsapp | instagram | indicacao
+  serviceInterest String?
+  estimatedValue  Float?
+  status          String   @default("NEW") // NEW | CONTACTED | REPLIED | PROPOSAL_SENT | NEGOTIATION | CLOSED | LOST
+  lastContactAt   DateTime?
+  nextAction      String?
+  observations    String?
+  followUpAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@map("leads")
+}
+
+model WorkanaProposal {
+  id           String   @id @default(cuid())
+  userId       String
+  projectName  String
+  client       String?
+  proposedValue Float?
+  sentAt       DateTime?
+  status       String   @default("FOUND") // FOUND | SENT | VIEWED | REPLIED | CLOSED | LOST
+  projectLink  String?
+  observations String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@map("workana_proposals")
+}
+
+model JobApplication {
+  id            String   @id @default(cuid())
+  userId        String
+  company       String
+  position      String
+  jobLink       String?
+  appliedAt     DateTime?
+  status        String   @default("FOUND") // FOUND | APPLIED | INTERVIEW | TECHNICAL_TEST | APPROVED | REJECTED
+  observations  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("job_applications")
+}
+
+model ContentPlan {
+  id           String   @id @default(cuid())
+  userId       String
+  platform     String   // instagram | linkedin
+  theme        String
+  status       String   @default("IDEA") // IDEA | CREATING | PUBLISHED | REUSE
+  scheduledFor DateTime?
+  publishedAt  DateTime?
+  observations String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([platform])
+  @@map("content_plans")
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  status      String   @default("IN_PROGRESS") // IDEA | IN_PROGRESS | PAUSED | DONE
+  priority    Int      @default(2)
+  deadline    DateTime?
+  observations String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectTasks ProjectTask[]
+
+  @@index([userId])
+  @@map("projects")
+}
+
+model ProjectTask {
+  id          String   @id @default(cuid())
+  projectId   String
+  title       String
+  description String?
+  status      String   @default("PENDING") // PENDING | IN_PROGRESS | DONE
+  priority    Int      @default(2)
+  dueDate     DateTime?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("project_tasks")
+}
+
+model Goal {
+  id          String   @id @default(cuid())
+  userId      String
+  title       String
+  description String?
+  type        String   // COUNTER | FINANCIAL | BOOLEAN
+  target      Float
+  current     Float    @default(0)
+  unit        String?
+  deadline    DateTime?
+  status      String   @default("ACTIVE") // ACTIVE | COMPLETED | PAUSED
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("goals")
+}
