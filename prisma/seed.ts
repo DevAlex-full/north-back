@@ -2,7 +2,17 @@ import 'dotenv/config'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 
+declare const process: {
+  env: {
+    SEED_USER_EMAIL?: string
+    SEED_USER_PASSWORD?: string
+  }
+}
+
 const prisma = new PrismaClient()
+
+const seedEmail = process.env.SEED_USER_EMAIL ?? 'alex@north.app'
+const seedPassword = process.env.SEED_USER_PASSWORD ?? 'north2024'
 
 async function main() {
   console.log('🌱 Iniciando seed do North...')
@@ -27,11 +37,11 @@ async function main() {
   await prisma.user.deleteMany()
 
   // Cria usuário principal
-  const hashedPassword = await bcrypt.hash('north2024', 10)
+  const hashedPassword = await bcrypt.hash(seedPassword, 10)
   const user = await prisma.user.create({
     data: {
       name: 'Alex',
-      email: 'alex@north.app',
+      email: seedEmail,
       password: hashedPassword,
       settings: {
         create: {
@@ -348,11 +358,14 @@ async function main() {
 
   console.log('\n🎉 Seed concluído com sucesso!')
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
-  console.log('📧 Email:    alex@north.app')
-  console.log('🔑 Senha:    north2024')
+  console.log(`📧 Email:    ${seedEmail}`)
+  console.log('🔑 Senha:    definida via SEED_USER_PASSWORD')
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
 }
 
 main()
-  .catch((e) => { console.error('❌ Erro no seed:', e); process.exit(1) })
+  .catch((e) => {
+    console.error('❌ Erro no seed:', e)
+      ; (globalThis as any).process?.exit(1)
+  })
   .finally(async () => { await prisma.$disconnect() })
