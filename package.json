@@ -15,7 +15,7 @@
     "db:reset": "prisma migrate reset --force && tsx prisma/seed.ts"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": "22.x"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",
@@ -32,7 +32,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20.11.20",
-    "dotenv": "^16.4.5",
+    "dotenv": "^16.6.1",
     "pino-pretty": "^11.0.0",
     "prisma": "^5.10.2",
     "tsx": "^4.7.1",
