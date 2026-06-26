@@ -6,10 +6,12 @@ async function main() {
   const app = await buildApp()
 
   try {
-    const port = parseInt(env.PORT, 10)
+    const port = Number(process.env.PORT) || Number(env.PORT) || 3000
+
     await app.listen({ port, host: '0.0.0.0' })
+
     console.log(`🚀 North API rodando na porta ${port}`)
-    console.log(`📖 Health check: http://localhost:${port}/health`)
+    console.log(`📖 Health check: http://0.0.0.0:${port}/health`)
     console.log(`🌍 Ambiente: ${env.NODE_ENV}`)
   } catch (err) {
     app.log.error(err)
