@@ -99,6 +99,7 @@ model FinancialTransaction {
   id          String   @id @default(cuid())
   userId      String
   categoryId  String
+  projectId   String?
   type        String   // INCOME | EXPENSE
   amount      Float
   description String?
@@ -110,10 +111,12 @@ model FinancialTransaction {
 
   user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   category FinancialCategory @relation(fields: [categoryId], references: [id])
+  project  Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([date])
   @@index([type])
+  @@index([projectId])
   @@map("financial_transactions")
 }
 
@@ -207,11 +210,14 @@ model Lead {
   company         String?
   niche           String?
   phone           String?
+  email           String?
+  whatsapp        String?
+  website         String?
   instagram       String?
   origin          String?  // workana | linkedin | facebook | whatsapp | instagram | indicacao
   serviceInterest String?
   estimatedValue  Float?
-  status          String   @default("NEW") // NEW | CONTACTED | REPLIED | PROPOSAL_SENT | NEGOTIATION | CLOSED | LOST
+  status          String   @default("NEW") // NEW | CONTACTED | REPLIED | PROPOSAL_SENT | NEGOTIATION | CLOSED | LOST | ACTIVE_CLIENT
   lastContactAt   DateTime?
   nextAction      String?
   observations    String?
@@ -219,7 +225,8 @@ model Lead {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projects Project[]
 
   @@index([userId])
   @@index([status])
@@ -288,17 +295,29 @@ model Project {
   userId      String
   name        String
   description String?
-  status      String   @default("IN_PROGRESS") // IDEA | IN_PROGRESS | PAUSED | DONE
+  status      String   @default("IN_PROGRESS") // IDEA | IN_PROGRESS | PAUSED | DONE — exclusivo de projetos pessoais (kind=PERSONAL)
   priority    Int      @default(2)
   deadline    DateTime?
   observations String?
+
+  // --- Campos da Fase 4 (North como ERP pessoal) ---
+  kind         String   @default("PERSONAL") // PERSONAL | CLIENT
+  clientId     String?  // vincula a um Lead (cliente/prospect), só relevante quando kind=CLIENT
+  clientStatus String?  // LEAD | PROPOSAL | NEGOTIATION | CLOSED | DEVELOPMENT | DELIVERED | SUPPORT | PAUSED_CLIENT | CANCELLED — pipeline comercial, separado de "status" para não quebrar projetos pessoais existentes
+  agreedValue  Float?   // valor combinado com o cliente; "recebido" e "pendente" são calculados a partir de FinancialTransaction, não persistidos aqui
+  nextAction   String?  // mesmo padrão já usado em Lead.nextAction
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  client       Lead?                  @relation(fields: [clientId], references: [id], onDelete: SetNull)
   projectTasks ProjectTask[]
+  transactions FinancialTransaction[]
 
   @@index([userId])
+  @@index([clientId])
+  @@index([kind])
   @@map("projects")
 }
 

@@ -6,13 +6,15 @@ import {
   updateProjectSchema,
   createProjectTaskSchema,
   updateProjectTaskSchema,
+  projectQuerySchema,
 } from '../validators/project.validator'
 
 const service = new ProjectService()
 
 export const projectController = {
   async getAll(req: FastifyRequest, rep: FastifyReply) {
-    return rep.send(await service.getProjects(req.userId))
+    const { kind } = projectQuerySchema.parse(req.query)
+    return rep.send(await service.getProjects(req.userId, kind))
   },
   async getOne(req: FastifyRequest, rep: FastifyReply) {
     const { id } = idParamSchema.parse(req.params)
@@ -46,5 +48,9 @@ export const projectController = {
     const { taskId } = projectTaskParamSchema.parse(req.params)
     await service.deleteTask(req.userId, taskId)
     return rep.status(204).send()
+  },
+  async getFinance(req: FastifyRequest, rep: FastifyReply) {
+    const { id } = idParamSchema.parse(req.params)
+    return rep.send(await service.getProjectFinance(req.userId, id))
   },
 }

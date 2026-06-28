@@ -19,6 +19,7 @@ export const updateCategorySchema = z.object({
 export const createTransactionSchema = z.object({
   type: financialTypeEnum,
   categoryId: z.string().min(1, 'Categoria é obrigatória'),
+  projectId: z.string().min(1).optional(),
   amount: z.number().positive('Valor deve ser maior que zero'),
   description: z.string().max(500).optional(),
   date: z.string().optional(),
@@ -29,6 +30,7 @@ export const createTransactionSchema = z.object({
 export const updateTransactionSchema = z.object({
   type: financialTypeEnum.optional(),
   categoryId: z.string().min(1).optional(),
+  projectId: z.string().min(1).nullable().optional(),
   amount: z.number().positive().optional(),
   description: z.string().max(500).optional(),
   date: z.string().optional(),
@@ -40,6 +42,7 @@ export const transactionsQuerySchema = z.object({
   startDate: z.string().optional(),
   endDate: z.string().optional(),
   type: financialTypeEnum.optional(),
+  projectId: z.string().min(1).optional(),
 })
 
 export const summaryQuerySchema = z.object({

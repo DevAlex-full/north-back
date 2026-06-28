@@ -13,10 +13,11 @@ export class FinancialRepository {
   async updateCategory(id: string, data: any) { return prisma.financialCategory.update({ where: { id }, data }) }
   async deleteCategory(id: string) { return prisma.financialCategory.delete({ where: { id } }) }
 
-  async findTransactions(userId: string, filters?: { startDate?: Date; endDate?: Date; type?: string }) {
+  async findTransactions(userId: string, filters?: { startDate?: Date; endDate?: Date; type?: string; projectId?: string }) {
     const where: any = { userId }
     if (filters?.startDate && filters?.endDate) where.date = { gte: filters.startDate, lte: filters.endDate }
     if (filters?.type) where.type = filters.type
+    if (filters?.projectId) where.projectId = filters.projectId
     return prisma.financialTransaction.findMany({ where, orderBy: { date: 'desc' }, include: { category: true } })
   }
 

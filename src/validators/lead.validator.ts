@@ -8,6 +8,7 @@ export const leadStatusEnum = z.enum([
   'NEGOTIATION',
   'CLOSED',
   'LOST',
+  'ACTIVE_CLIENT',
 ])
 
 export const createLeadSchema = z.object({
@@ -15,6 +16,9 @@ export const createLeadSchema = z.object({
   company: z.string().max(200).optional(),
   niche: z.string().max(200).optional(),
   phone: z.string().max(30).optional(),
+  email: z.string().email('Email inválido').max(200).optional(),
+  whatsapp: z.string().max(30).optional(),
+  website: z.string().max(300).optional(),
   instagram: z.string().max(100).optional(),
   origin: z.string().max(50).optional(),
   serviceInterest: z.string().max(200).optional(),
@@ -31,6 +35,9 @@ export const updateLeadSchema = z.object({
   company: z.string().max(200).optional(),
   niche: z.string().max(200).optional(),
   phone: z.string().max(30).optional(),
+  email: z.string().email('Email inválido').max(200).optional(),
+  whatsapp: z.string().max(30).optional(),
+  website: z.string().max(300).optional(),
   instagram: z.string().max(100).optional(),
   origin: z.string().max(50).optional(),
   serviceInterest: z.string().max(200).optional(),

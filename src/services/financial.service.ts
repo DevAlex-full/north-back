@@ -1,6 +1,8 @@
 import { FinancialRepository } from '../repositories/financial.repository'
+import { ProjectRepository } from '../repositories/project.repository'
 
 const repo = new FinancialRepository()
+const projectRepo = new ProjectRepository()
 
 export class FinancialService {
   async getCategories(userId: string) {
@@ -23,21 +25,35 @@ export class FinancialService {
     return repo.deleteCategory(id)
   }
 
-  async getTransactions(userId: string, filters?: { startDate?: string; endDate?: string; type?: string }) {
+  /**
+   * Garante que, se um projectId for informado, ele corresponda a um
+   * Project existente e pertencente ao próprio usuário — evita vincular
+   * uma transação a um projeto de outra conta.
+   */
+  private async assertProjectOwnership(userId: string, projectId?: string | null) {
+    if (!projectId) return
+    const project = await projectRepo.findById(projectId, userId)
+    if (!project) throw { statusCode: 404, message: 'Projeto não encontrado' }
+  }
+
+  async getTransactions(userId: string, filters?: { startDate?: string; endDate?: string; type?: string; projectId?: string }) {
     return repo.findTransactions(userId, {
       startDate: filters?.startDate ? new Date(filters.startDate) : undefined,
       endDate: filters?.endDate ? new Date(filters.endDate) : undefined,
       type: filters?.type,
+      projectId: filters?.projectId,
     })
   }
 
   async createTransaction(userId: string, data: any) {
+    await this.assertProjectOwnership(userId, data.projectId)
     return repo.createTransaction({ ...data, userId, date: data.date ? new Date(data.date) : new Date() })
   }
 
   async updateTransaction(userId: string, id: string, data: any) {
     const t = await repo.findTransactionById(id, userId)
     if (!t) throw { statusCode: 404, message: 'Transação não encontrada' }
+    if (data.projectId !== undefined) await this.assertProjectOwnership(userId, data.projectId)
     return repo.updateTransaction(id, data)
   }
 
