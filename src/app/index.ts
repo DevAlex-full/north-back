@@ -18,6 +18,7 @@ import { scheduleRoutes } from '../routes/schedule.routes'
 import { contentRoutes } from '../routes/content.routes'
 import { jobRoutes } from '../routes/job.routes'
 import { dashboardRoutes } from '../routes/dashboard.routes'
+import { activityRoutes } from '../routes/activity.routes'
 
 export async function buildApp() {
   const fastify = Fastify({
@@ -70,6 +71,7 @@ export async function buildApp() {
   fastify.register(scheduleRoutes, { prefix })
   fastify.register(contentRoutes, { prefix })
   fastify.register(jobRoutes, { prefix })
+  fastify.register(activityRoutes, { prefix })
 
   return fastify
 }

@@ -30,6 +30,7 @@ model User {
   projects             Project[]
   goals                Goal[]
   settings             UserSettings?
+  activityLogs         ActivityLog[]
 
   @@map("users")
 }
@@ -225,8 +226,9 @@ model Lead {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  projects Project[]
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projects     Project[]
+  activityLogs ActivityLog[]
 
   @@index([userId])
   @@index([status])
@@ -314,6 +316,7 @@ model Project {
   client       Lead?                  @relation(fields: [clientId], references: [id], onDelete: SetNull)
   projectTasks ProjectTask[]
   transactions FinancialTransaction[]
+  activityLogs ActivityLog[]
 
   @@index([userId])
   @@index([clientId])
@@ -333,7 +336,8 @@ model ProjectTask {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project  Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subtasks ProjectSubTask[]
 
   @@index([projectId])
   @@map("project_tasks")
@@ -357,4 +361,45 @@ model Goal {
 
   @@index([userId])
   @@map("goals")
+}
+
+model ProjectSubTask {
+  id          String    @id @default(cuid())
+  taskId      String
+  title       String
+  status      String    @default("PENDING") // PENDING | DONE
+  order       Int       @default(0)
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  task ProjectTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@map("project_subtasks")
+}
+
+model ActivityLog {
+  id          String    @id @default(cuid())
+  userId      String
+  leadId      String?
+  projectId   String?
+  type        String    // CONTACT_MADE | REPLY_RECEIVED | PROPOSAL_SENT | NEGOTIATION_STARTED | DEAL_CLOSED | PROJECT_STARTED | PAYMENT_RECEIVED | DELIVERY_MADE | SUPPORT_STARTED | NOTE
+  title       String
+  description String?
+  source      String    @default("MANUAL") // MANUAL | AUTO
+  metadata    Json?
+  occurredAt  DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lead    Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([leadId])
+  @@index([projectId])
+  @@index([occurredAt])
+  @@map("activity_logs")
 }

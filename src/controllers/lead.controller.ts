@@ -2,8 +2,13 @@ import { FastifyRequest, FastifyReply } from 'fastify'
 import { LeadService } from '../services/lead.service'
 import { idParamSchema } from '../validators/common.validator'
 import { createLeadSchema, updateLeadSchema, leadQuerySchema } from '../validators/lead.validator'
+import { z } from 'zod'
 
 const service = new LeadService()
+
+const followUpQuerySchema = z.object({
+  days: z.coerce.number().int().min(1).max(90).optional().default(7),
+})
 
 export const leadController = {
   async getAll(req: FastifyRequest, rep: FastifyReply) {
@@ -27,5 +32,10 @@ export const leadController = {
     const { id } = idParamSchema.parse(req.params)
     await service.deleteLead(req.userId, id)
     return rep.status(204).send()
+  },
+  // Fase 4.3 — Follow-ups
+  async getFollowUps(req: FastifyRequest, rep: FastifyReply) {
+    const { days } = followUpQuerySchema.parse(req.query)
+    return rep.send(await service.getFollowUps(req.userId, days))
   },
 }

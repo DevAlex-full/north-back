@@ -13,11 +13,6 @@ export class ProjectService {
     return p
   }
 
-  /**
-   * Garante que, se um clientId for informado, ele corresponda a um Lead
-   * existente e pertencente ao próprio usuário — evita vincular um projeto
-   * a um cliente de outra conta.
-   */
   private async assertClientOwnership(userId: string, clientId?: string | null) {
     if (!clientId) return
     const lead = await leadRepo.findById(clientId, userId)
@@ -52,13 +47,30 @@ export class ProjectService {
 
   async deleteTask(userId: string, id: string) { return repo.deleteTask(id) }
 
+  // --- Fase 4.3: Subtarefas ---
+
+  async createSubTask(userId: string, taskId: string, data: { title: string; order: number }) {
+    const task = await repo.findTaskById(taskId)
+    if (!task) throw { statusCode: 404, message: 'Tarefa não encontrada' }
+    return repo.createSubTask({ taskId, title: data.title, order: data.order ?? 0 })
+  }
+
+  async updateSubTask(userId: string, subId: string, data: { title?: string; status?: string; order?: number }) {
+    const completedAt = data.status === 'DONE' ? new Date() : data.status === 'PENDING' ? null : undefined
+    return repo.updateSubTask(subId, {
+      title:       data.title,
+      status:      data.status,
+      order:       data.order,
+      ...(completedAt !== undefined ? { completedAt } : {}),
+    })
+  }
+
+  async deleteSubTask(userId: string, subId: string) {
+    return repo.deleteSubTask(subId)
+  }
+
   /**
-   * Resumo financeiro de um projeto: valor combinado, recebido (soma de
-   * transações INCOME vinculadas), gasto (soma de EXPENSE vinculadas),
-   * pendente (combinado - recebido, nunca negativo) e lucro. Nada aqui é
-   * persistido — é sempre calculado a partir do ledger em
-   * FinancialTransaction, para nunca ficar inconsistente com os
-   * lançamentos reais.
+   * Resumo financeiro de um projeto. Preservado sem alteração da Fase 4.1.
    */
   async getProjectFinance(userId: string, id: string) {
     const project = await this.getProject(userId, id)
@@ -71,12 +83,6 @@ export class ProjectService {
     const agreedValue = Number((project as any).agreedValue ?? 0)
     const pending = Math.max(0, agreedValue - received)
 
-    return {
-      agreedValue,
-      received,
-      pending,
-      spent,
-      profit: received - spent,
-    }
+    return { agreedValue, received, pending, spent, profit: received - spent }
   }
 }

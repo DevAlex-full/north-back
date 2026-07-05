@@ -7,6 +7,9 @@ import {
   createProjectTaskSchema,
   updateProjectTaskSchema,
   projectQuerySchema,
+  createSubTaskSchema,
+  updateSubTaskSchema,
+  subTaskParamSchema,
 } from '../validators/project.validator'
 
 const service = new ProjectService()
@@ -52,5 +55,22 @@ export const projectController = {
   async getFinance(req: FastifyRequest, rep: FastifyReply) {
     const { id } = idParamSchema.parse(req.params)
     return rep.send(await service.getProjectFinance(req.userId, id))
+  },
+
+  // --- Fase 4.3: Subtarefas ---
+  async createSubTask(req: FastifyRequest, rep: FastifyReply) {
+    const { taskId } = projectTaskParamSchema.parse(req.params)
+    const data = createSubTaskSchema.parse(req.body)
+    return rep.status(201).send(await service.createSubTask(req.userId, taskId, data))
+  },
+  async updateSubTask(req: FastifyRequest, rep: FastifyReply) {
+    const { subId } = subTaskParamSchema.parse(req.params)
+    const data = updateSubTaskSchema.parse(req.body)
+    return rep.send(await service.updateSubTask(req.userId, subId, data))
+  },
+  async deleteSubTask(req: FastifyRequest, rep: FastifyReply) {
+    const { subId } = subTaskParamSchema.parse(req.params)
+    await service.deleteSubTask(req.userId, subId)
+    return rep.status(204).send()
   },
 }

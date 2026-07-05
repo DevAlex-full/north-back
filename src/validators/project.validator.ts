@@ -66,3 +66,22 @@ export const updateProjectTaskSchema = z.object({
   priority: z.number().int().min(1).max(3).optional(),
   dueDate: z.string().optional(),
 })
+
+// --- Fase 4.3: Subtarefas ---
+
+export const createSubTaskSchema = z.object({
+  title: z.string().min(1, 'Título é obrigatório').max(200),
+  order: z.number().int().min(0).optional().default(0),
+})
+
+export const updateSubTaskSchema = z.object({
+  title:  z.string().min(1).max(200).optional(),
+  status: z.enum(['PENDING', 'DONE']).optional(),
+  order:  z.number().int().min(0).optional(),
+})
+
+export const subTaskParamSchema = z.object({
+  id:    z.string().min(1),
+  taskId: z.string().min(1),
+  subId: z.string().min(1),
+})
