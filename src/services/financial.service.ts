@@ -1,8 +1,10 @@
 import { FinancialRepository } from '../repositories/financial.repository'
 import { ProjectRepository } from '../repositories/project.repository'
+import { ActivityRepository } from '../repositories/activity.repository'
 
 const repo = new FinancialRepository()
 const projectRepo = new ProjectRepository()
+const activityRepo = new ActivityRepository()
 
 export class FinancialService {
   async getCategories(userId: string) {
@@ -47,7 +49,31 @@ export class FinancialService {
 
   async createTransaction(userId: string, data: any) {
     await this.assertProjectOwnership(userId, data.projectId)
-    return repo.createTransaction({ ...data, userId, date: data.date ? new Date(data.date) : new Date() })
+    const transaction = await repo.createTransaction({ ...data, userId, date: data.date ? new Date(data.date) : new Date() })
+    await this.logPaymentActivityIfNeeded(userId, transaction)
+    return transaction
+  }
+
+  /**
+   * Fase 4.4A — Ao registrar um pagamento (INCOME) vinculado a um projeto,
+   * cria automaticamente um ActivityLog (source: AUTO) na timeline do
+   * projeto. Roda uma única vez por transação criada (nunca em update ou
+   * delete), então não há risco de duplicidade. Não dispara para EXPENSE
+   * nem para transações sem projectId — mantém a timeline focada em
+   * marcos comerciais relevantes.
+   */
+  private async logPaymentActivityIfNeeded(userId: string, transaction: any) {
+    if (transaction.type !== 'INCOME' || !transaction.projectId) return
+    const amountLabel = `R$ ${Number(transaction.amount).toFixed(2).replace('.', ',')}`
+    await activityRepo.create({
+      userId,
+      projectId: transaction.projectId,
+      type: 'PAYMENT_RECEIVED',
+      title: 'Pagamento recebido',
+      description: transaction.description ? `${amountLabel} — ${transaction.description}` : amountLabel,
+      source: 'AUTO',
+      occurredAt: transaction.date,
+    })
   }
 
   async updateTransaction(userId: string, id: string, data: any) {
