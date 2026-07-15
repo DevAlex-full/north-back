@@ -19,6 +19,7 @@ import { contentRoutes } from '../routes/content.routes'
 import { jobRoutes } from '../routes/job.routes'
 import { dashboardRoutes } from '../routes/dashboard.routes'
 import { activityRoutes } from '../routes/activity.routes'
+import { webhookNorthSdrRoutes } from '../routes/webhook-north-sdr.routes'
 
 export async function buildApp() {
   const fastify = Fastify({
@@ -72,6 +73,7 @@ export async function buildApp() {
   fastify.register(contentRoutes, { prefix })
   fastify.register(jobRoutes, { prefix })
   fastify.register(activityRoutes, { prefix })
+  fastify.register(webhookNorthSdrRoutes, { prefix })
 
   return fastify
 }
