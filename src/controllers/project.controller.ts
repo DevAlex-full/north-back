@@ -43,13 +43,13 @@ export const projectController = {
     return rep.status(201).send(await service.createTask(req.userId, id, data))
   },
   async updateTask(req: FastifyRequest, rep: FastifyReply) {
-    const { taskId } = projectTaskParamSchema.parse(req.params)
+    const { id, taskId } = projectTaskParamSchema.parse(req.params)
     const data = updateProjectTaskSchema.parse(req.body)
-    return rep.send(await service.updateTask(req.userId, taskId, data))
+    return rep.send(await service.updateTask(req.userId, id, taskId, data))
   },
   async deleteTask(req: FastifyRequest, rep: FastifyReply) {
-    const { taskId } = projectTaskParamSchema.parse(req.params)
-    await service.deleteTask(req.userId, taskId)
+    const { id, taskId } = projectTaskParamSchema.parse(req.params)
+    await service.deleteTask(req.userId, id, taskId)
     return rep.status(204).send()
   },
   async getFinance(req: FastifyRequest, rep: FastifyReply) {
@@ -57,20 +57,19 @@ export const projectController = {
     return rep.send(await service.getProjectFinance(req.userId, id))
   },
 
-  // --- Fase 4.3: Subtarefas ---
+  // --- Fase 6.1.6: Subtarefas com ownership completo e retorno consolidado ---
   async createSubTask(req: FastifyRequest, rep: FastifyReply) {
-    const { taskId } = projectTaskParamSchema.parse(req.params)
+    const { id, taskId } = projectTaskParamSchema.parse(req.params)
     const data = createSubTaskSchema.parse(req.body)
-    return rep.status(201).send(await service.createSubTask(req.userId, taskId, data))
+    return rep.status(201).send(await service.createSubTask(req.userId, id, taskId, data))
   },
   async updateSubTask(req: FastifyRequest, rep: FastifyReply) {
-    const { subId } = subTaskParamSchema.parse(req.params)
+    const { id, taskId, subId } = subTaskParamSchema.parse(req.params)
     const data = updateSubTaskSchema.parse(req.body)
-    return rep.send(await service.updateSubTask(req.userId, subId, data))
+    return rep.send(await service.updateSubTask(req.userId, id, taskId, subId, data))
   },
   async deleteSubTask(req: FastifyRequest, rep: FastifyReply) {
-    const { subId } = subTaskParamSchema.parse(req.params)
-    await service.deleteSubTask(req.userId, subId)
-    return rep.status(204).send()
+    const { id, taskId, subId } = subTaskParamSchema.parse(req.params)
+    return rep.send(await service.deleteSubTask(req.userId, id, taskId, subId))
   },
 }
