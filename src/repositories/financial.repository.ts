@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma'
+import { parseDateOnlySP } from '../utils/date-sp'
 
 export class FinancialRepository {
   async findCategories(userId: string) {
@@ -29,31 +30,72 @@ export class FinancialRepository {
   async updateTransaction(id: string, data: any) { return prisma.financialTransaction.update({ where: { id }, data, include: { category: true } }) }
   async deleteTransaction(id: string) { return prisma.financialTransaction.delete({ where: { id } }) }
 
+  /**
+   * Correção funcional — `endDate` agora é sempre um limite EXCLUSIVO
+   * (início do dia seguinte ao último dia do período), calculado via
+   * `utils/date-sp.ts`. Usa `lt` em vez do antigo `lte` com
+   * `23:59:59.999` — mais correto e independente de precisão de
+   * milissegundos.
+   */
   async getSummary(userId: string, startDate: Date, endDate: Date) {
     const transactions = await prisma.financialTransaction.findMany({
-      where: { userId, date: { gte: startDate, lte: endDate } }
+      where: { userId, date: { gte: startDate, lt: endDate } }
     })
     const income = transactions.filter((t: any) => t.type === 'INCOME').reduce((s: number, t: any) => s + t.amount, 0)
     const expense = transactions.filter((t: any) => t.type === 'EXPENSE').reduce((s: number, t: any) => s + t.amount, 0)
     return { income, expense, profit: income - expense }
   }
 
-  async findDailyGoal(userId: string, date: Date) {
-    const start = new Date(date); start.setHours(0, 0, 0, 0)
-    const end = new Date(date); end.setHours(23, 59, 59, 999)
-    return prisma.dailyGoal.findFirst({ where: { userId, date: { gte: start, lte: end } } })
+  /**
+   * Todas as transações do usuário dentro de um intervalo [start, end)
+   * de instantes, com a categoria incluída — usado pela reconciliação da
+   * Meta Indrive (`FinancialService.reconcileDailyGoalFromTransactions`),
+   * que precisa do nome da categoria para classificar Indrive/Gasolina.
+   */
+  async findTransactionsInRange(userId: string, start: Date, end: Date) {
+    return prisma.financialTransaction.findMany({
+      where: { userId, date: { gte: start, lt: end } },
+      include: { category: true },
+    })
   }
 
-  async upsertDailyGoal(userId: string, date: Date, data: any) {
-    const dayDate = new Date(date); dayDate.setHours(0, 0, 0, 0)
+  /** `dateStr` é sempre uma data civil "YYYY-MM-DD" em America/Sao_Paulo — nunca um `Date` com `setHours()`. */
+  async findDailyGoal(userId: string, dateStr: string) {
+    const day = parseDateOnlySP(dateStr)
+    return prisma.dailyGoal.findUnique({ where: { userId_date: { userId, date: day } } })
+  }
+
+  /**
+   * Upsert do registro consolidado de `DailyGoal` — sempre com os quatro
+   * campos já calculados (nunca parcial), pois `earnedAmount`/`gasAmount`
+   * deixaram de ser editáveis manualmente (ver
+   * `FinancialService.reconcileDailyGoalFromTransactions`).
+   */
+  async upsertDailyGoalRecord(
+    userId: string,
+    dateStr: string,
+    data: { targetAmount: number; earnedAmount: number; gasAmount: number; status: string }
+  ) {
+    const day = parseDateOnlySP(dateStr)
     return prisma.dailyGoal.upsert({
-      where: { userId_date: { userId, date: dayDate } },
-      create: { userId, date: dayDate, targetAmount: data.targetAmount ?? 150, earnedAmount: data.earnedAmount ?? 0, gasAmount: data.gasAmount ?? 0, status: data.status ?? 'BELOW' },
+      where: { userId_date: { userId, date: day } },
+      create: { userId, date: day, ...data },
       update: data,
     })
   }
 
+  /**
+   * Correção (Bloqueio 2) — `endDate` agora é sempre um limite EXCLUSIVO
+   * (início do dia civil seguinte ao último dia do histórico, calculado
+   * em `FinancialService.getDailyGoalHistory` via `getDayRangeSP`), então
+   * a consulta usa `lt`, não `lte`.
+   */
   async findDailyGoals(userId: string, startDate: Date, endDate: Date) {
-    return prisma.dailyGoal.findMany({ where: { userId, date: { gte: startDate, lte: endDate } }, orderBy: { date: 'desc' } })
+    return prisma.dailyGoal.findMany({ where: { userId, date: { gte: startDate, lt: endDate } }, orderBy: { date: 'desc' } })
+  }
+
+  /** Fallback de `targetAmount` quando não há `DailyGoal` nem edição manual anterior para o dia. */
+  async findUserSettings(userId: string) {
+    return prisma.userSettings.findUnique({ where: { userId } })
   }
 }

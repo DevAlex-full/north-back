@@ -2,6 +2,7 @@ import { FastifyRequest, FastifyReply } from 'fastify'
 import { TaskService } from '../services/task.service'
 import { idParamSchema } from '../validators/common.validator'
 import { createTaskSchema, updateTaskSchema, taskQuerySchema, taskProgressQuerySchema } from '../validators/task.validator'
+import { getTodayDateStringSP } from '../utils/date-sp'
 
 const service = new TaskService()
 
@@ -36,7 +37,9 @@ export const taskController = {
 
   async getDayProgress(request: FastifyRequest, reply: FastifyReply) {
     const query = taskProgressQuerySchema.parse(request.query)
-    const d = query.date || new Date().toISOString().split('T')[0]
+    // Correção funcional — fallback do "hoje" em America/Sao_Paulo, não
+    // `new Date().toISOString()` (que reflete o dia em UTC do servidor).
+    const d = query.date || getTodayDateStringSP()
     return reply.send(await service.getDayProgress(request.userId, d))
   },
 }

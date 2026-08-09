@@ -1,10 +1,51 @@
 import { FinancialRepository } from '../repositories/financial.repository'
 import { ProjectRepository } from '../repositories/project.repository'
 import { ActivityRepository } from '../repositories/activity.repository'
+import { formatDateStringSP, getDayRangeSP, getTodayDateStringSP } from '../utils/date-sp'
 
 const repo = new FinancialRepository()
 const projectRepo = new ProjectRepository()
 const activityRepo = new ActivityRepository()
+
+/** Arredonda para 2 casas decimais, evitando resíduos de ponto flutuante (ex: 0.1 + 0.2). */
+function round2(n: number): number {
+  return Math.round(n * 100) / 100
+}
+
+/**
+ * Normaliza um texto para comparação: remove acentuação (NFD + strip de
+ * marcas diacríticas), corta espaços nas pontas e converte para
+ * minúsculas — "Combustível", " combustivel ", "COMBUSTÍVEL" e
+ * "combustível" resultam todos em "combustivel".
+ */
+function normalize(s?: string | null): string {
+  return (s ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+}
+
+type ClassifiableTransaction = { type: string; source?: string | null; category?: { name: string } | null }
+
+/** Uma transação conta como ganho Indrive quando é INCOME e a origem OU a categoria (normalizadas) forem "indrive". */
+function isIndriveIncomeTx(t: ClassifiableTransaction): boolean {
+  if (t.type !== 'INCOME') return false
+  return normalize(t.source) === 'indrive' || normalize(t.category?.name) === 'indrive'
+}
+
+/**
+ * Uma transação conta como gasto de gasolina quando é EXPENSE e a origem
+ * (normalizada) for "gasolina"/"fuel", ou a categoria (normalizada) for
+ * "gasolina"/"combustivel" (cobre "combustível" via normalização de
+ * acento). Nunca conta Erva, comissão ou qualquer outra saída.
+ */
+function isGasExpenseTx(t: ClassifiableTransaction): boolean {
+  if (t.type !== 'EXPENSE') return false
+  const source = normalize(t.source)
+  const categoryName = normalize(t.category?.name)
+  return source === 'gasolina' || source === 'fuel' || categoryName === 'gasolina' || categoryName === 'combustivel'
+}
 
 export class FinancialService {
   async getCategories(userId: string) {
@@ -51,6 +92,10 @@ export class FinancialService {
     await this.assertProjectOwnership(userId, data.projectId)
     const transaction = await repo.createTransaction({ ...data, userId, date: data.date ? new Date(data.date) : new Date() })
     await this.logPaymentActivityIfNeeded(userId, transaction)
+    // Correção funcional (problema 1) — FinancialTransaction é a fonte de
+    // verdade da Meta Indrive; toda criação reconcilia o DailyGoal do dia
+    // civil (SP) em que a transação caiu, sem exigir edição manual.
+    await this.reconcileDailyGoalFromTransactions(userId, formatDateStringSP(transaction.date))
     return transaction
   }
 
@@ -80,48 +125,125 @@ export class FinancialService {
     const t = await repo.findTransactionById(id, userId)
     if (!t) throw { statusCode: 404, message: 'Transação não encontrada' }
     if (data.projectId !== undefined) await this.assertProjectOwnership(userId, data.projectId)
-    return repo.updateTransaction(id, data)
+
+    const previousDateStr = formatDateStringSP(t.date)
+    const updated = await repo.updateTransaction(id, data)
+    const newDateStr = formatDateStringSP(updated.date)
+
+    // Correção funcional — reconcilia o dia antigo (caso o valor, tipo,
+    // origem, categoria ou data tenham mudado o que contava para a meta)
+    // e o dia novo, caso a data da transação tenha mudado.
+    await this.reconcileDailyGoalFromTransactions(userId, previousDateStr)
+    if (newDateStr !== previousDateStr) {
+      await this.reconcileDailyGoalFromTransactions(userId, newDateStr)
+    }
+
+    return updated
   }
 
   async deleteTransaction(userId: string, id: string) {
     const t = await repo.findTransactionById(id, userId)
     if (!t) throw { statusCode: 404, message: 'Transação não encontrada' }
-    return repo.deleteTransaction(id)
+    const dateStr = formatDateStringSP(t.date)
+    const result = await repo.deleteTransaction(id)
+    await this.reconcileDailyGoalFromTransactions(userId, dateStr)
+    return result
   }
 
+  /**
+   * Correção funcional — período "day" agora ancorado no dia civil de
+   * São Paulo (não em `new Date()` interpretado no fuso do servidor);
+   * "week"/"month" seguem a mesma âncora para não divergir do "day". O
+   * limite superior de cada período é sempre exclusivo (início do dia
+   * seguinte ao último dia), calculado via `getDayRangeSP`.
+   */
   async getSummary(userId: string, period: 'day' | 'week' | 'month') {
-    const now = new Date()
-    let startDate: Date, endDate: Date = new Date(now)
-    endDate.setHours(23, 59, 59, 999)
+    const todayStr = getTodayDateStringSP()
+    let startDateStr: string
+    let endDateStr: string
 
     if (period === 'day') {
-      startDate = new Date(now); startDate.setHours(0, 0, 0, 0)
+      startDateStr = todayStr
+      endDateStr = todayStr
     } else if (period === 'week') {
-      startDate = new Date(now); startDate.setDate(now.getDate() - now.getDay()); startDate.setHours(0, 0, 0, 0)
-      endDate = new Date(startDate); endDate.setDate(startDate.getDate() + 6); endDate.setHours(23, 59, 59, 999)
+      const [y, m, d] = todayStr.split('-').map(Number)
+      const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay()
+      const sunday = new Date(Date.UTC(y, m - 1, d))
+      sunday.setUTCDate(sunday.getUTCDate() - dow)
+      const saturday = new Date(sunday)
+      saturday.setUTCDate(sunday.getUTCDate() + 6)
+      startDateStr = sunday.toISOString().slice(0, 10)
+      endDateStr = saturday.toISOString().slice(0, 10)
     } else {
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1)
-      endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)
+      const [y, m] = todayStr.split('-').map(Number)
+      startDateStr = `${y}-${String(m).padStart(2, '0')}-01`
+      const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate()
+      endDateStr = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
     }
-    return repo.getSummary(userId, startDate, endDate)
+
+    const { start } = getDayRangeSP(startDateStr)
+    const { end } = getDayRangeSP(endDateStr)
+    return repo.getSummary(userId, start, end)
   }
 
+  /** Resolve o `targetAmount`: override explícito > DailyGoal já existente para o dia > UserSettings > 150. */
+  private async resolveTargetAmount(userId: string, dateStr: string, override?: number): Promise<number> {
+    if (override !== undefined) return override
+    const existingGoal = await repo.findDailyGoal(userId, dateStr)
+    if (existingGoal) return existingGoal.targetAmount
+    const settings = await repo.findUserSettings(userId)
+    return settings?.dailyGoalAmount ?? 150
+  }
+
+  /**
+   * Correção funcional (problema 1) — Operação central de reconciliação:
+   * recalcula `earnedAmount`/`gasAmount` do DailyGoal do dia (civil, SP) a
+   * partir das FinancialTransaction reais daquele dia — nunca a partir de
+   * edição manual. `targetAmountOverride` permite ao usuário continuar
+   * definindo a meta manualmente (`updateDailyGoal`), sem reintroduzir
+   * edição manual de earned/gas.
+   */
+  async reconcileDailyGoalFromTransactions(userId: string, dateStr: string, targetAmountOverride?: number) {
+    const { start, end } = getDayRangeSP(dateStr)
+    const transactions = await repo.findTransactionsInRange(userId, start, end)
+
+    const earnedAmount = round2(transactions.filter(isIndriveIncomeTx).reduce((s, t) => s + t.amount, 0))
+    const gasAmount = round2(transactions.filter(isGasExpenseTx).reduce((s, t) => s + t.amount, 0))
+    const targetAmount = await this.resolveTargetAmount(userId, dateStr, targetAmountOverride)
+
+    const netProfit = earnedAmount - gasAmount
+    let status: 'BELOW' | 'ALMOST' | 'REACHED' = 'BELOW'
+    if (netProfit >= targetAmount) status = 'REACHED'
+    else if (netProfit >= targetAmount * 0.8) status = 'ALMOST'
+
+    return repo.upsertDailyGoalRecord(userId, dateStr, { targetAmount, earnedAmount, gasAmount, status })
+  }
+
+  /** Sempre reconciliado a partir das transações reais — nunca lê um DailyGoal potencialmente desatualizado. */
   async getDailyGoal(userId: string, date: string) {
-    return repo.findDailyGoal(userId, new Date(date))
+    return this.reconcileDailyGoalFromTransactions(userId, date)
   }
 
-  async updateDailyGoal(userId: string, date: string, data: any) {
-    const goal = await repo.upsertDailyGoal(userId, new Date(date), data)
-    // Calculate status
-    const netProfit = (goal.earnedAmount || 0) - (goal.gasAmount || 0)
-    let status = 'BELOW'
-    if (netProfit >= goal.targetAmount) status = 'REACHED'
-    else if (netProfit >= goal.targetAmount * 0.8) status = 'ALMOST'
-    return repo.upsertDailyGoal(userId, new Date(date), { ...data, status })
+  /**
+   * Única edição manual permitida é `targetAmount` — `earnedAmount` e
+   * `gasAmount`, se enviados pelo cliente, são ignorados: eles são
+   * sempre recalculados a partir das transações reais do dia.
+   */
+  async updateDailyGoal(userId: string, date: string, data: { targetAmount?: number }) {
+    return this.reconcileDailyGoalFromTransactions(userId, date, data.targetAmount)
   }
 
+  /**
+   * Correção (Bloqueio 2) — `startDate`/`endDate` são datas civis
+   * "YYYY-MM-DD" em SP; o intervalo de consulta usa `getDayRangeSP` para
+   * os dois limites, e `end` passa a ser o INÍCIO do dia civil seguinte
+   * ao `endDate` informado (limite exclusivo) — nunca `new Date(str)`
+   * cru, que ignora o fuso do usuário.
+   */
   async getDailyGoalHistory(userId: string, startDate: string, endDate: string) {
-    return repo.findDailyGoals(userId, new Date(startDate), new Date(endDate))
+    const { start } = getDayRangeSP(startDate)
+    const { end } = getDayRangeSP(endDate)
+    return repo.findDailyGoals(userId, start, end)
   }
 
   getSuggestion(amount: number) {

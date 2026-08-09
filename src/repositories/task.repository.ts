@@ -1,12 +1,19 @@
 import { prisma } from '../lib/prisma'
+import { getDayRangeSP } from '../utils/date-sp'
 
 export class TaskRepository {
-  async findMany(userId: string, filters?: { date?: Date; status?: string }) {
+  /**
+   * Correção funcional — `filters.date` é sempre uma data civil
+   * "YYYY-MM-DD" (o dia que o usuário selecionou/está vendo), nunca um
+   * `Date` já resolvido. O intervalo do dia é sempre calculado em
+   * America/Sao_Paulo via `getDayRangeSP`, nunca com `setHours()` (que
+   * usa o fuso do servidor — divergente do usuário à noite no Brasil).
+   */
+  async findMany(userId: string, filters?: { date?: string; status?: string }) {
     const where: any = { userId }
     if (filters?.date) {
-      const start = new Date(filters.date); start.setHours(0, 0, 0, 0)
-      const end = new Date(filters.date); end.setHours(23, 59, 59, 999)
-      where.date = { gte: start, lte: end }
+      const { start, end } = getDayRangeSP(filters.date)
+      where.date = { gte: start, lt: end }
     }
     if (filters?.status) where.status = filters.status
     return prisma.task.findMany({ where, orderBy: [{ priority: 'asc' }, { date: 'asc' }] })
@@ -28,11 +35,11 @@ export class TaskRepository {
     return prisma.task.delete({ where: { id } })
   }
 
-  async countByDate(userId: string, date: Date) {
-    const start = new Date(date); start.setHours(0, 0, 0, 0)
-    const end = new Date(date); end.setHours(23, 59, 59, 999)
-    const total = await prisma.task.count({ where: { userId, date: { gte: start, lte: end } } })
-    const done = await prisma.task.count({ where: { userId, date: { gte: start, lte: end }, status: 'DONE' } })
+  /** `date` é uma data civil "YYYY-MM-DD" — ver nota em `findMany`. */
+  async countByDate(userId: string, date: string) {
+    const { start, end } = getDayRangeSP(date)
+    const total = await prisma.task.count({ where: { userId, date: { gte: start, lt: end } } })
+    const done = await prisma.task.count({ where: { userId, date: { gte: start, lt: end }, status: 'DONE' } })
     return { total, done }
   }
 }

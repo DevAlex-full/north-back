@@ -13,6 +13,7 @@ import {
   updateDailyGoalSchema,
   dailyGoalHistoryQuerySchema,
 } from '../validators/financial.validator'
+import { getTodayDateStringSP, addDaysToDateStringSP } from '../utils/date-sp'
 
 const service = new FinancialService()
 
@@ -67,21 +68,23 @@ export const financialController = {
 
   async getDailyGoal(request: FastifyRequest, reply: FastifyReply) {
     const query = dailyGoalQuerySchema.parse(request.query)
-    const d = query.date || new Date().toISOString().split('T')[0]
+    const d = query.date || getTodayDateStringSP()
     return reply.send(await service.getDailyGoal(request.userId, d))
   },
 
   async updateDailyGoal(request: FastifyRequest, reply: FastifyReply) {
     const query = dailyGoalQuerySchema.parse(request.query)
     const data = updateDailyGoalSchema.parse(request.body)
-    const d = query.date || new Date().toISOString().split('T')[0]
+    const d = query.date || getTodayDateStringSP()
     return reply.send(await service.updateDailyGoal(request.userId, d, data))
   },
 
   async getDailyGoalHistory(request: FastifyRequest, reply: FastifyReply) {
     const query = dailyGoalHistoryQuerySchema.parse(request.query)
-    const end = query.endDate || new Date().toISOString().split('T')[0]
-    const start = query.startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    const end = query.endDate || getTodayDateStringSP()
+    // Correção (Bloqueio 2) — "30 dias atrás" em data civil SP, nunca
+    // `new Date().toISOString()` (que reflete o dia em UTC do servidor).
+    const start = query.startDate || addDaysToDateStringSP(getTodayDateStringSP(), -30)
     return reply.send(await service.getDailyGoalHistory(request.userId, start, end))
   },
 
