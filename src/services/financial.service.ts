@@ -26,6 +26,9 @@ function normalize(s?: string | null): string {
     .toLowerCase()
 }
 
+/** Nomes de categoria (já normalizados) reconhecidos como Gasolina/Combustível. */
+const GAS_CATEGORY_NAMES = new Set(['gasolina', 'combustivel'])
+
 type ClassifiableTransaction = { type: string; source?: string | null; category?: { name: string } | null }
 
 /** Uma transação conta como ganho Indrive quando é INCOME e a origem OU a categoria (normalizadas) forem "indrive". */
@@ -35,16 +38,15 @@ function isIndriveIncomeTx(t: ClassifiableTransaction): boolean {
 }
 
 /**
- * Uma transação conta como gasto de gasolina quando é EXPENSE e a origem
- * (normalizada) for "gasolina"/"fuel", ou a categoria (normalizada) for
- * "gasolina"/"combustivel" (cobre "combustível" via normalização de
- * acento). Nunca conta Erva, comissão ou qualquer outra saída.
+ * Correção Meta Indrive — Uma transação conta como despesa operacional do
+ * Indrive quando `type === 'EXPENSE'` e `affectsIndriveGoal === true`.
+ * Essa é a ÚNICA regra usada na reconciliação: nenhuma leitura de
+ * `description`, nenhuma heurística de texto em tempo de consulta. A
+ * classificação é decidida uma única vez, estruturalmente, no momento em
+ * que a transação é criada/editada (ver `resolveAffectsIndriveGoal`).
  */
-function isGasExpenseTx(t: ClassifiableTransaction): boolean {
-  if (t.type !== 'EXPENSE') return false
-  const source = normalize(t.source)
-  const categoryName = normalize(t.category?.name)
-  return source === 'gasolina' || source === 'fuel' || categoryName === 'gasolina' || categoryName === 'combustivel'
+function isIndriveOperationalExpenseTx(t: { type: string; affectsIndriveGoal: boolean }): boolean {
+  return t.type === 'EXPENSE' && t.affectsIndriveGoal === true
 }
 
 export class FinancialService {
@@ -79,6 +81,40 @@ export class FinancialService {
     if (!project) throw { statusCode: 404, message: 'Projeto não encontrado' }
   }
 
+  /**
+   * Correção Meta Indrive — Busca a categoria com ownership (o
+   * `categoryId` não era validado contra o usuário antes desta correção;
+   * como o nome da categoria já precisa ser lido aqui para a
+   * classificação automática de Gasolina, a checagem de ownership vem
+   * junto, sem custo extra).
+   */
+  private async getOwnedCategory(userId: string, categoryId: string) {
+    const category = await repo.findCategoryById(categoryId, userId)
+    if (!category) throw { statusCode: 404, message: 'Categoria não encontrada' }
+    return category
+  }
+
+  /**
+   * Correção Meta Indrive — Decide, estruturalmente, se uma SAÍDA afeta a
+   * Meta Indrive:
+   * 1. INCOME nunca afeta (a meta líquida só existe para despesas);
+   * 2. categoria "Gasolina"/"Combustível" força `true` automaticamente,
+   *    sem exigir nenhuma escolha do usuário (o nome da categoria é uma
+   *    escolha estrutural do próprio usuário na lista de categorias, não
+   *    texto livre de `description` — nunca lemos `description` aqui);
+   * 3. caso contrário, respeita o que o usuário marcou explicitamente
+   *    (`affectsIndriveGoal`), com `false` como padrão.
+   */
+  private resolveAffectsIndriveGoal(
+    type: string,
+    categoryName: string | undefined,
+    requested: boolean | undefined
+  ): boolean {
+    if (type !== 'EXPENSE') return false
+    if (GAS_CATEGORY_NAMES.has(normalize(categoryName))) return true
+    return requested ?? false
+  }
+
   async getTransactions(userId: string, filters?: { startDate?: string; endDate?: string; type?: string; projectId?: string }) {
     return repo.findTransactions(userId, {
       startDate: filters?.startDate ? new Date(filters.startDate) : undefined,
@@ -90,11 +126,19 @@ export class FinancialService {
 
   async createTransaction(userId: string, data: any) {
     await this.assertProjectOwnership(userId, data.projectId)
-    const transaction = await repo.createTransaction({ ...data, userId, date: data.date ? new Date(data.date) : new Date() })
+    const category = await this.getOwnedCategory(userId, data.categoryId)
+    const affectsIndriveGoal = this.resolveAffectsIndriveGoal(data.type, category.name, data.affectsIndriveGoal)
+
+    const transaction = await repo.createTransaction({
+      ...data,
+      affectsIndriveGoal,
+      userId,
+      date: data.date ? new Date(data.date) : new Date(),
+    })
     await this.logPaymentActivityIfNeeded(userId, transaction)
-    // Correção funcional (problema 1) — FinancialTransaction é a fonte de
-    // verdade da Meta Indrive; toda criação reconcilia o DailyGoal do dia
-    // civil (SP) em que a transação caiu, sem exigir edição manual.
+    // FinancialTransaction é a fonte de verdade da Meta Indrive; toda
+    // criação reconcilia o DailyGoal do dia civil (SP) em que a transação
+    // caiu, sem exigir edição manual.
     await this.reconcileDailyGoalFromTransactions(userId, formatDateStringSP(transaction.date))
     return transaction
   }
@@ -126,13 +170,36 @@ export class FinancialService {
     if (!t) throw { statusCode: 404, message: 'Transação não encontrada' }
     if (data.projectId !== undefined) await this.assertProjectOwnership(userId, data.projectId)
 
+    // Correção Meta Indrive — recalcula affectsIndriveGoal sempre que o
+    // tipo, a categoria, ou o próprio vínculo forem tocados neste update;
+    // se nada disso vier no payload, preserva a classificação atual (uma
+    // edição de valor/descrição não deve silenciosamente "resetar" a
+    // classificação da transação).
+    const effectiveType = data.type ?? t.type
+    let effectiveCategoryName: string | undefined = t.category?.name
+    if (data.categoryId !== undefined && data.categoryId !== t.categoryId) {
+      const category = await this.getOwnedCategory(userId, data.categoryId)
+      effectiveCategoryName = category.name
+    }
+
+    const categoryOrTypeChanged = data.type !== undefined || data.categoryId !== undefined
+    const affectsIndriveGoalChanged = data.affectsIndriveGoal !== undefined
+
+    if (categoryOrTypeChanged || affectsIndriveGoalChanged) {
+      data.affectsIndriveGoal = this.resolveAffectsIndriveGoal(
+        effectiveType,
+        effectiveCategoryName,
+        data.affectsIndriveGoal ?? t.affectsIndriveGoal
+      )
+    }
+
     const previousDateStr = formatDateStringSP(t.date)
     const updated = await repo.updateTransaction(id, data)
     const newDateStr = formatDateStringSP(updated.date)
 
-    // Correção funcional — reconcilia o dia antigo (caso o valor, tipo,
-    // origem, categoria ou data tenham mudado o que contava para a meta)
-    // e o dia novo, caso a data da transação tenha mudado.
+    // Reconcilia o dia antigo (caso valor, tipo, origem, categoria,
+    // vínculo com o Indrive ou data tenham mudado o que contava para a
+    // meta) e o dia novo, caso a data da transação tenha mudado.
     await this.reconcileDailyGoalFromTransactions(userId, previousDateStr)
     if (newDateStr !== previousDateStr) {
       await this.reconcileDailyGoalFromTransactions(userId, newDateStr)
@@ -151,11 +218,11 @@ export class FinancialService {
   }
 
   /**
-   * Correção funcional — período "day" agora ancorado no dia civil de
-   * São Paulo (não em `new Date()` interpretado no fuso do servidor);
-   * "week"/"month" seguem a mesma âncora para não divergir do "day". O
-   * limite superior de cada período é sempre exclusivo (início do dia
-   * seguinte ao último dia), calculado via `getDayRangeSP`.
+   * Período "day" ancorado no dia civil de São Paulo (não em `new Date()`
+   * interpretado no fuso do servidor); "week"/"month" seguem a mesma
+   * âncora para não divergir do "day". O limite superior de cada período
+   * é sempre exclusivo (início do dia seguinte ao último dia), calculado
+   * via `getDayRangeSP`.
    */
   async getSummary(userId: string, period: 'day' | 'week' | 'month') {
     const todayStr = getTodayDateStringSP()
@@ -196,27 +263,35 @@ export class FinancialService {
   }
 
   /**
-   * Correção funcional (problema 1) — Operação central de reconciliação:
-   * recalcula `earnedAmount`/`gasAmount` do DailyGoal do dia (civil, SP) a
-   * partir das FinancialTransaction reais daquele dia — nunca a partir de
-   * edição manual. `targetAmountOverride` permite ao usuário continuar
-   * definindo a meta manualmente (`updateDailyGoal`), sem reintroduzir
-   * edição manual de earned/gas.
+   * Correção Meta Indrive — Operação central de reconciliação: recalcula
+   * `earnedAmount`/`expenseAmount` do DailyGoal do dia (civil, SP) a
+   * partir das FinancialTransaction reais daquele dia:
+   * - `earnedAmount`: soma das entradas classificadas como ganho Indrive
+   *   (`isIndriveIncomeTx`, regra preservada da correção anterior);
+   * - `expenseAmount`: soma de TODAS as saídas com
+   *   `affectsIndriveGoal = true` — gasolina (classificada
+   *   automaticamente na escrita) e qualquer outra despesa vinculada
+   *   explicitamente ao Indrive, nunca com base em texto de descrição.
+   *
+   * `targetAmountOverride` permite ao usuário continuar definindo a meta
+   * manualmente (`updateDailyGoal`), sem reintroduzir edição manual de
+   * earned/expense.
    */
   async reconcileDailyGoalFromTransactions(userId: string, dateStr: string, targetAmountOverride?: number) {
     const { start, end } = getDayRangeSP(dateStr)
     const transactions = await repo.findTransactionsInRange(userId, start, end)
 
     const earnedAmount = round2(transactions.filter(isIndriveIncomeTx).reduce((s, t) => s + t.amount, 0))
-    const gasAmount = round2(transactions.filter(isGasExpenseTx).reduce((s, t) => s + t.amount, 0))
+    const expenseAmount = round2(transactions.filter(isIndriveOperationalExpenseTx).reduce((s, t) => s + t.amount, 0))
     const targetAmount = await this.resolveTargetAmount(userId, dateStr, targetAmountOverride)
 
-    const netProfit = earnedAmount - gasAmount
+    // netAmount = ganho bruto do Indrive - despesas operacionais do Indrive.
+    const netAmount = round2(earnedAmount - expenseAmount)
     let status: 'BELOW' | 'ALMOST' | 'REACHED' = 'BELOW'
-    if (netProfit >= targetAmount) status = 'REACHED'
-    else if (netProfit >= targetAmount * 0.8) status = 'ALMOST'
+    if (netAmount >= targetAmount) status = 'REACHED'
+    else if (netAmount >= targetAmount * 0.8) status = 'ALMOST'
 
-    return repo.upsertDailyGoalRecord(userId, dateStr, { targetAmount, earnedAmount, gasAmount, status })
+    return repo.upsertDailyGoalRecord(userId, dateStr, { targetAmount, earnedAmount, expenseAmount, status })
   }
 
   /** Sempre reconciliado a partir das transações reais — nunca lê um DailyGoal potencialmente desatualizado. */
@@ -225,20 +300,19 @@ export class FinancialService {
   }
 
   /**
-   * Única edição manual permitida é `targetAmount` — `earnedAmount` e
-   * `gasAmount`, se enviados pelo cliente, são ignorados: eles são
-   * sempre recalculados a partir das transações reais do dia.
+   * Única edição manual permitida é `targetAmount` — `earnedAmount`/
+   * `expenseAmount`, mesmo que enviados pelo cliente, são ignorados: eles
+   * são sempre recalculados a partir das transações reais do dia.
    */
   async updateDailyGoal(userId: string, date: string, data: { targetAmount?: number }) {
     return this.reconcileDailyGoalFromTransactions(userId, date, data.targetAmount)
   }
 
   /**
-   * Correção (Bloqueio 2) — `startDate`/`endDate` são datas civis
-   * "YYYY-MM-DD" em SP; o intervalo de consulta usa `getDayRangeSP` para
-   * os dois limites, e `end` passa a ser o INÍCIO do dia civil seguinte
-   * ao `endDate` informado (limite exclusivo) — nunca `new Date(str)`
-   * cru, que ignora o fuso do usuário.
+   * `startDate`/`endDate` são datas civis "YYYY-MM-DD" em SP; o intervalo
+   * de consulta usa `getDayRangeSP` para os dois limites, e `end` passa a
+   * ser o INÍCIO do dia civil seguinte ao `endDate` informado (limite
+   * exclusivo) — nunca `new Date(str)` cru, que ignora o fuso do usuário.
    */
   async getDailyGoalHistory(userId: string, startDate: string, endDate: string) {
     const { start } = getDayRangeSP(startDate)

@@ -43,8 +43,8 @@ export class DashboardService {
 
     const targetAmount = dailyGoal.targetAmount
     const earned = dailyGoal.earnedAmount
-    const gas = dailyGoal.gasAmount
-    const netProfit = earned - gas
+    const expenses = dailyGoal.expenseAmount
+    const netProfit = earned - expenses
     const remaining = Math.max(0, targetAmount - netProfit)
 
     // Saudação: hora atual em São Paulo, não a hora local do servidor.
@@ -60,7 +60,8 @@ export class DashboardService {
       tasks,
       financial: {
         earned,
-        gas,
+        expenses,
+        gas: expenses, // alias legado temporário — ver dashboard.tsx, remover quando o app publicado consumir `expenses`
         netProfit,
         target: targetAmount,
         remaining,

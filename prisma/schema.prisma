@@ -107,6 +107,14 @@ model FinancialTransaction {
   date        DateTime @default(now())
   paymentMethod String?
   source      String?  // indrive | freelance | outros
+  /// Correção Meta Indrive — fonte estrutural (não textual) que decide se
+  /// esta SAÍDA deve reduzir a Meta Indrive. Definida em tempo de escrita
+  /// (create/update), nunca inferida por heurística de texto em runtime:
+  /// - Categoria "Gasolina"/"Combustível" força true automaticamente;
+  /// - o usuário pode marcar explicitamente qualquer outra saída como
+  ///   despesa operacional do Indrive (pedágio, estacionamento, etc.);
+  /// - irrelevante para INCOME (sempre false).
+  affectsIndriveGoal Boolean @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -127,7 +135,19 @@ model DailyGoal {
   date        DateTime
   targetAmount Float
   earnedAmount Float   @default(0)
-  gasAmount    Float   @default(0)
+  /// DÍVIDA SEMÂNTICA TEMPORÁRIA (correção de compatibilidade de deploy):
+  /// o nome físico da coluna permanece `gasAmount` para não exigir uma
+  /// janela de rollout incompatível entre backend/migration. O campo
+  /// passou a representar TODAS as despesas operacionais do Indrive
+  /// (gasolina + qualquer outra vinculada via
+  /// `FinancialTransaction.affectsIndriveGoal`), não só gasolina — mas
+  /// isso NÃO é visível aqui no schema, só na camada de repository
+  /// (`financial.repository.ts`), que é a fronteira oficial dessa
+  /// tradução: para cima dela (service/controller/API/frontend), o nome
+  /// de domínio correto é sempre `expenseAmount`. Renomear esta coluna
+  /// fisicamente fica para uma entrega futura, feita com uma janela de
+  /// deploy coordenada (não durante um rollout ao vivo).
+  gasAmount   Float   @default(0)
   status      String   @default("BELOW") // BELOW | ALMOST | REACHED
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

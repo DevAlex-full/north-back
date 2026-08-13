@@ -25,6 +25,8 @@ export const createTransactionSchema = z.object({
   date: z.string().optional(),
   paymentMethod: z.string().max(50).optional(),
   source: z.string().max(50).optional(),
+  /** Correção Meta Indrive — vínculo estrutural explícito, só relevante para EXPENSE (ver financial.service.ts). */
+  affectsIndriveGoal: z.boolean().optional(),
 })
 
 export const updateTransactionSchema = z.object({
@@ -36,6 +38,7 @@ export const updateTransactionSchema = z.object({
   date: z.string().optional(),
   paymentMethod: z.string().max(50).optional(),
   source: z.string().max(50).optional(),
+  affectsIndriveGoal: z.boolean().optional(),
 })
 
 export const transactionsQuerySchema = z.object({
@@ -58,8 +61,6 @@ export const dailyGoalQuerySchema = z.object({
 })
 
 export const updateDailyGoalSchema = z.object({
-  earnedAmount: z.number().min(0).optional(),
-  gasAmount: z.number().min(0).optional(),
   targetAmount: z.number().positive().optional(),
 })
 
